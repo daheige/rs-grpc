@@ -1,0 +1,40 @@
+[package]
+name = "rs-grpc"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "rs-rpc-client"
+path = "src/client.rs"
+
+[[bin]]
+name = "rs-grpc-gateway"
+path = "gateway/main.rs"
+
+[[bin]]
+name = "rs-multiplex-svc"
+path = "src/multiplex_server.rs"
+
+[dependencies]
+tonic = "0.14.2"
+prost = "0.14.1"
+tonic-prost = "0.14.2"
+tonic-reflection = "0.14.2"
+
+# 异步运行时相关依赖
+tokio = { version = "1.47.1", features = ["full"] }
+async-trait = "0.1.89"
+
+# axum用于http服务
+axum = "0.8.6"
+serde = { version = "1.0.228", features = ["derive"] }
+
+# autometrics-rs 用于自动prometheus metrics服务可观测性
+autometrics = { version = "3.0.0", features = ["prometheus-exporter"] }
+
+# 用于将grpc服务和http服务运行在一个端口上面
+tower = { version = "0.5.2", features = ["steer"] }
+
+[build-dependencies]
+# note: Must be the same as the tonic version
+tonic-prost-build = "0.14.2"
