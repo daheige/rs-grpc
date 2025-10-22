@@ -1,6 +1,6 @@
 # rs-grpc
 
-rust grpc microservices in action project https://github.com/daheige/rs-rpc
+rust grpc microservices in action project https://github.com/daheige/rs-grpc
 
 # rust grpc crate
 
@@ -547,6 +547,9 @@ curl --location --request POST 'localhost:8090/v1/greeter/say_hello' \
   }
 }
 ```
+
+http gateway运行机制(图片来自grpc-ecosystem/grpc-gateway):
+![](http-gateway.jpg)
 
 # prometheus metrics
 
