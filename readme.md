@@ -599,7 +599,7 @@ prometheus at:0.0.0.0:2338/metrics
 ```
 
 此时访问 metrics访问地址：http://localhost:2338/metrics 效果如下图所示：
-![](metrics.jpg)
+![](metrics.png)
 你可以根据实际情况接入grafana控制控制面板，实时观察prometheus指标。
 
 # go grpc framework demo
