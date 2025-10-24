@@ -1,14 +1,19 @@
+use crate::infras::logger::Logger;
+use app::APP_CONFIG;
 use autometrics::autometrics;
-use infras::metrics::prometheus_init;
+use infras::metrics::{API_SLO, prometheus_init};
+use log::info;
 use rust_grpc::hello::greeter_service_server::{GreeterService, GreeterServiceServer};
 use rust_grpc::hello::{HelloReply, HelloReq};
 use std::net::SocketAddr;
 use std::time::Duration;
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{Request, Response, Status, transport::Server};
 
 mod infras;
 /// 定义grpc代码生成的包名
 mod rust_grpc;
+
+mod app;
 
 // 这个file descriptor文件是build.rs中定义的descriptor_path路径
 // 读取proto file descriptor bin二进制文件
@@ -21,7 +26,9 @@ pub struct GreeterImpl {}
 #[async_trait::async_trait]
 impl GreeterService for GreeterImpl {
     // 实现async_hello方法
-    #[autometrics]
+    #[autometrics(objective = API_SLO)]
+    // 也可以使用下面的方式，简单处理
+    // #[autometrics]
     async fn say_hello(&self, request: Request<HelloReq>) -> Result<Response<HelloReply>, Status> {
         // 获取request pb message
         let req = &request.into_inner();
@@ -39,17 +46,23 @@ impl GreeterService for GreeterImpl {
 /// 采用 tokio 运行时来跑grpc server
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let address: SocketAddr = "0.0.0.0:50051".parse()?;
-    println!("grpc server run on:{}", address);
+    // 初始化日志配置
+    Logger::builder().init();
+    println!("current pid:{}", std::process::id());
 
-    // grpc reflection服务
+    // 读取配置文件
+    info!("app_debug:{}", APP_CONFIG.app_debug);
+    let address: SocketAddr = format!("0.0.0.0:{}", APP_CONFIG.grpc_port).parse().unwrap();
+    info!("grpc server run on:{}", address);
+
+    // grpc reflection服务，这个可以根据实际情况来开启
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(PROTO_FILE_DESCRIPTOR_SET)
         .build_v1()
         .unwrap();
 
     // create http /metrics endpoint
-    let metrics_server = prometheus_init(2338);
+    let metrics_server = prometheus_init(APP_CONFIG.monitor_port);
     let metrics_handler = tokio::spawn(metrics_server);
 
     // create grpc server

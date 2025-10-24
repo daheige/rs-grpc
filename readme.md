@@ -236,7 +236,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
 
     // create http /metrics endpoint
-    let metrics_server = prometheus_init(2338);
+    let metrics_server = prometheus_init(8090);
     let metrics_handler = tokio::spawn(metrics_server);
 
     // create grpc server
@@ -258,6 +258,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+# settings
+
+配置文件读取，参考: `infras/config.rs` 和 `src/app.rs`
 
 # grpcurl tools usage
 
@@ -281,7 +285,7 @@ tonic grpc reflection使用需要注意的事项：
  go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
  ```
 
-2. 验证rs-rpc service启动的效果
+2. 验证rs-grpc service启动的效果
 
  ```shell
  grpcurl -plaintext 127.0.0.1:50051 list
@@ -430,7 +434,7 @@ output:
 
 ```
  Finished dev [unoptimized + debuginfo] target(s) in 0.18s
- Running `target/debug/rs-rpc`
+ Running `target/debug/rs-grpc`
  grpc server run on:127.0.0.1:50051
 ```
 
@@ -511,7 +515,20 @@ output:
 
 # rust http gateway
 
-运行这个gateway/main.rs之前，请先启动src/main.rs启动rust grpc service
+1. 运行这个`gateway/main.rs`之前，请先启动src/main.rs启动rust grpc service
+2. 修改`app-gw.yaml`中的配置内容
+
+```yaml
+app_name: "rs-grpc-gateway"
+app_debug: true # 是否开启调试模式
+# 该grpc_addr可以是服务的ip地址和端口模式，也可以是k8s命名服务的地址，例如：http://rs-grpc.local.svc:50051
+# 运行前请先启动rs-grpc，再运行该gateway
+grpc_addr: http://192.168.1.101:50051
+monitor_port: 8091
+gateway_port: 8080
+```
+
+运行方式如下：
 
 ```shell
 cargo run --bin rs-grpc-gateway
@@ -524,13 +541,13 @@ Finished dev [unoptimized + debuginfo] target(s) in 0.15s
 Running `target/debug/rs-grpc-gateway`
 rs-rpc http gateway
 current process pid:34744
-app run on:127.0.0.1:8090
+app run on:127.0.0.1:8080
 ```
 
 验证http请求是否生效：
 
 ```shell
-curl --location --request POST 'localhost:8090/v1/greeter/say_hello' \
+curl --location --request POST 'localhost:8080/v1/greeter/say_hello' \
 --header 'Content-Type: application/json' \
 --data-raw '{"id":1,"name":"daheige"}'
 ```
@@ -557,7 +574,7 @@ src/main.rs代码片段如下：
 
 ```rust
 // create http /metrics endpoint
-let metrics_server = prometheus_init(2338);
+let metrics_server = prometheus_init(8091);
 let metrics_handler = tokio::spawn(metrics_server);
 
 // create grpc server
@@ -579,7 +596,7 @@ let _ = tokio::try_join!(metrics_handler, grpc_handler);
 Ok(())
 ```
 
-运行rs-rpc服务端：
+运行rs-grpc服务端：
 
 ```shell
 cargo run --bin rs-grpc
@@ -589,9 +606,9 @@ cargo run --bin rs-grpc
 
 ```
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
-     Running `target/debug/rs-rpc`
+     Running `target/debug/rs-grpc`
 grpc server run on:0.0.0.0:50051
-prometheus at:0.0.0.0:2338/metrics
+prometheus at:0.0.0.0:8090/metrics
 
 ```
 
@@ -601,9 +618,44 @@ prometheus at:0.0.0.0:2338/metrics
  grpcurl -d '{"name":"daheige"}' -plaintext 127.0.0.1:50051 Hello.GreeterService.SayHello
 ```
 
-此时访问 metrics访问地址：http://localhost:2338/metrics 效果如下图所示：
+此时访问 metrics访问地址：http://localhost:8090/metrics 效果如下图所示：
 ![](metrics.png)
 你可以根据实际情况接入grafana控制控制面板，实时观察prometheus指标。
+
+# logger
+
+1. 日志记录使用`env_logger`和`log`库实现
+2. 如果想在启动时改变日志级别，可以通过指定环境变量启动应用
+3. 日志level 优先级 error > warn > info > debug > trace
+4. 启动方式：RUST_LOG=info cargo run --bin rs-grpc
+
+## 本地运行方式
+
+rpc服务运行方式如下：
+
+```shell
+RUST_LOG=info cargo run --bin rs-grpc
+```
+
+rpc服务运行方式如下：
+
+```shell
+RUST_LOG=info cargo run --bin rs-grpc-gateway
+```
+
+## 测试环境和线上环境运行方式
+
+rpc服务运行方式如下：
+
+```shell
+RUST_LOG=info /app/rs-grpc
+```
+
+rpc服务运行方式如下：
+
+```shell
+RUST_LOG=info /app/rs-grpc-gateway
+```
 
 # go grpc framework demo
 

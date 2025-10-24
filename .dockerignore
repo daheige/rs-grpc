@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+target/*
+.idea/*
+.DS_Store
+.idea
+target
+.vscode
+clients/nodejs/node_modules
+clients/go/hello
+gateway/gateway
+src/rust_grpc/rpc_descriptor.bin
+*.log
+*.pdf
+bin/docker*

@@ -3,6 +3,7 @@
 'use strict';
 var grpc = require('@grpc/grpc-js');
 var hello_pb = require('./hello_pb.js');
+// var google_api_annotations_pb = require('./google/api/annotations_pb.js');
 
 function serialize_Hello_HelloReply(arg) {
   if (!(arg instanceof hello_pb.HelloReply)) {
@@ -27,9 +28,6 @@ function deserialize_Hello_HelloReq(buffer_arg) {
 }
 
 
-// 如果需要http gateway的话，请打开这个注释
-// import "google/api/annotations.proto";
-//
 var GreeterServiceService = exports.GreeterServiceService = {
   sayHello: {
     path: '/Hello.GreeterService/SayHello',
@@ -42,12 +40,6 @@ var GreeterServiceService = exports.GreeterServiceService = {
     responseSerialize: serialize_Hello_HelloReply,
     responseDeserialize: deserialize_Hello_HelloReply,
   },
-  // 如果需要http gateway的话，请打开这个注释
-//        option (google.api.http) = {
-//            // get: "/v1/greeter/say_hello/{name}"
-//            post: "/v1/greeter/say_hello"
-//            body: "*"
-//        };
 };
 
 exports.GreeterServiceClient = grpc.makeGenericClientConstructor(GreeterServiceService, 'GreeterService');

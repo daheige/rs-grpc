@@ -1,0 +1,4 @@
+app_name: "rs-grpc-proj"
+app_debug: true
+grpc_port: 50051
+monitor_port: 8090

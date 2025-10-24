@@ -1,19 +1,27 @@
 // 如果想使用grpc-go http gateway请使用main.go中的方式
 // grpc-go http gateway实现参考：https://github.com/grpc-ecosystem/grpc-gateway
 // 也可以使用rust axum http处理
+mod app;
+mod infras;
 mod rust_grpc;
-use rust_grpc::hello::greeter_service_client::GreeterServiceClient;
+
 use rust_grpc::hello::HelloReq;
+use rust_grpc::hello::greeter_service_client::GreeterServiceClient;
 
 // 用于http 请求处理
 use axum::routing::{get, post};
-use axum::{http::StatusCode, response::IntoResponse, Json, Router};
+use axum::{Json, Router, http::StatusCode, response::IntoResponse};
 use tonic::Request;
 
 // 用于序列化处理
 use serde::{Deserialize, Serialize};
 
 // 用于http 启动
+use crate::infras::logger::Logger;
+use app::APP_CONFIG;
+use autometrics::autometrics;
+use infras::metrics::{API_SLO, prometheus_init};
+use log::info;
 use std::net::SocketAddr;
 use std::process;
 use std::sync::Arc;
@@ -28,9 +36,10 @@ pub struct Reply<T> {
     pub data: Option<T>,
 }
 
-const GRPC_ADDRESS: &str = "http://127.0.0.1:50051";
-
 // 将请求反序列化到HelloReq，然后调用grpc service
+#[autometrics(objective = API_SLO)]
+// 也可以使用下面的方式，简单处理
+// #[autometrics]
 async fn say_hello(Json(payload): Json<HelloReq>, state: Arc<AppState>) -> impl IntoResponse {
     let req = Request::new(payload);
     let response = state.grpc_client.clone().say_hello(req).await;
@@ -68,8 +77,17 @@ struct AppState {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("rs-rpc http gateway");
+    println!("current process pid:{}", process::id());
+
+    // 初始化日志配置
+    Logger::builder().init();
+
+    // 读取配置文件
+    info!("app_debug:{}", APP_CONFIG.app_debug);
+    let grpc_addr = APP_CONFIG.grpc_addr.as_str();
+
     // create grpc client
-    let grpc_client = GreeterServiceClient::connect(GRPC_ADDRESS).await?;
+    let grpc_client = GreeterServiceClient::connect(grpc_addr).await?;
 
     // 通过arc引用计数的方式传递state
     let app_state = Arc::new(AppState { grpc_client });
@@ -87,19 +105,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }),
         );
 
-    println!("current process pid:{}", process::id());
+    // http gateway address
+    let address: SocketAddr = format!("0.0.0.0:{}", APP_CONFIG.gateway_port)
+        .parse()
+        .unwrap();
+    info!("app run on:{}", address.to_string());
 
-    // run app
-    let address: SocketAddr = "0.0.0.0:8090".parse().unwrap();
-    println!("app run on:{}", address.to_string());
+    // create gateway http server
+    let gateway_handler = tokio::spawn(async move {
+        // Create a `TcpListener` using tokio.
+        let listener = TcpListener::bind(address)
+            .await
+            .expect("failed to bind server");
+        // // run multiplex service with graceful shutdown
+        axum::serve(listener, router.into_make_service())
+            .with_graceful_shutdown(graceful_shutdown())
+            .await
+            .expect("failed to start server");
+    });
 
-    // Create a `TcpListener` using tokio.
-    let listener = TcpListener::bind(address).await.unwrap();
+    // build http /metrics endpoint
+    let metrics_server = prometheus_init(APP_CONFIG.monitor_port);
+    let metrics_handler = tokio::spawn(metrics_server);
 
-    // // run multiplex service with graceful shutdown
-    axum::serve(listener, router.into_make_service())
-        .with_graceful_shutdown(graceful_shutdown())
-        .await?;
+    // run http gateway and metrics server in routine
+    let _ = tokio::try_join!(gateway_handler, metrics_handler)
+        .expect("failed to start http gateway and metrics service");
 
     Ok(())
 }

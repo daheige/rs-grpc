@@ -1,0 +1,7 @@
+app_name: "rs-grpc-gateway"
+app_debug: true # 是否开启调试模式
+# 该grpc_addr可以是服务的ip地址和端口模式，也可以是k8s命名服务的地址，例如：http://rs-grpc.local.svc:50051
+# 运行前请先启动rs-grpc，再运行该gateway
+grpc_addr: http://192.168.1.101:50051
+monitor_port: 8091
+gateway_port: 8080
