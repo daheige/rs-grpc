@@ -11,6 +11,12 @@ GATEWAY_IMAGE_NAME := rs-grpc-gateway
 GATEWAY_SERVICE := rs-gateway
 CONFIG_DIR := ./
 
+# 生成go和nodejs对应的pb代码
+gen-go-pb:
+    sh bin/go-gen.sh
+gen-node-pb:
+    sh bin/nodejs-gen.sh
+
 # rust rs-grpc开发环境镜像构建
 rust-dev:
 	docker build . -f Dockerfile-dev -t ${DEV_IMAGE_NAME}:${VERSION}

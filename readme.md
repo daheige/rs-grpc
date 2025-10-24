@@ -657,6 +657,18 @@ rpc服务运行方式如下：
 RUST_LOG=info /app/rs-grpc-gateway
 ```
 
+# makefile
+
+为了方便开发和运行，提供了makefile文件，可以快速通过make命令构建docker镜像后，再启动容器。
+运行方式如下：
+
+```shell
+make rs-build
+make rs-run
+```
+
+如果想重新构建和运行，直接运行`make rs-rebuild-run`即可。
+
 # go grpc framework demo
 
 https://github.com/daheige/hephfx
