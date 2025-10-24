@@ -663,8 +663,8 @@ RUST_LOG=info /app/rs-grpc-gateway
 运行方式如下：
 
 ```shell
-make rs-build
-make rs-run
+make rpc-build
+make rpc-run
 ```
 
 如果想重新构建和运行，直接运行`make rs-rebuild-run`即可。
