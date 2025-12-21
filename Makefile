@@ -54,7 +54,12 @@ gateway-stop:
 # 重启gateway
 gateway-restart: gateway-stop gateway-run
 
+gen: gen-go-pb gen-node-pb
+	@echo "gen rust pb code"
+	cargo build
+
 gen-go-pb:
 	sh bin/go-gen.sh
+
 gen-node-pb:
 	sh bin/nodejs-gen.sh

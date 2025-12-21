@@ -40,6 +40,8 @@ mkdir -p $root_dir/clients/go/pb
 cp -R $root_dir/pb/*.go $root_dir/clients/go/pb
 rm -rf $root_dir/pb/
 
+go mod tidy
+
 echo "generating golang code success"
 
 echo "\n\033[0;32mGenerate codes successfully!\033[39;49;0m\n"

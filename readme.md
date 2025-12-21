@@ -12,47 +12,91 @@ tonic https://crates.io/crates/tonic
 - grpc客户端支持go,nodejs,rust等不同语言调用服务端程序
 - 支持http gateway模式（http json请求到网关层后，转换为pb message，然后发起grpc service调用
 
-# centos7 install protoc
-
-    1、下载https://github.com/protocolbuffers/protobuf/archive/v3.15.8.tar.gz
-        cd /usr/local/src
-        sudo wget https://github.com/protocolbuffers/protobuf/archive/v3.15.8.tar.gz
-
-    2、开始安装
-        sudo mv v3.15.8.tar.gz protobuf-3.15.8.tar.gz
-        sudo tar zxvf protobuf-3.15.8.tar.gz
-        cd protobuf-3.15.8
-        sudo yum install gcc-c++ cmake libtool
-        # 对于ubuntu系统 sudo apt install gcc cmake make libtool
-        $ sudo mkdir /usr/local/protobuf
-
-        需要编译, 在新版的 PB 源码中，是不包含 .configure 文件的，需要生成
-        此时先执行 sudo ./autogen.sh 
-        脚本说明如下:
-        # Run this script to generate the configure script and other files that will
-        # be included in the distribution. These files are not checked in because they
-        # are automatically generated.
-
-        此时生成了 .configure 文件，可以开始编译了
-        sudo ./configure --prefix=/usr/local/protobuf
-        sudo make && make install
-
-        安装完成后,查看版本:
-        $ cd /usr/local/protobuf/bin
-        $ ./protoc --version
-        libprotoc 3.15.8
-        
-        建立软链接
-        $ sudo ln -s /usr/local/protobuf/bin/protoc /usr/bin/protoc
-        $ sudo chmod +x /usr/bin/protoc
-
-# mac install protoc
-
+# tools installation before development
+1. 进入 https://go.dev/dl/ 官方网站，根据系统安装不同的go版本，这里推荐在linux或mac系统上面安装go。
+2. 设置Go GOPROXY 环境变量
+```shell
+go env -w GOPROXY=https://goproxy.cn,direct
+```
+3. 安装protoc工具
+- mac系统安装方式如下：
 ```shell
 brew install automake
 brew install libtool
 brew install protobuf
 ```
+- linux系统安装方式如下：
+```shell
+# Reference: https://grpc.io/docs/protoc-installation/
+PB_REL="https://github.com/protocolbuffers/protobuf/releases"
+curl -LO $PB_REL/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
+unzip -o protoc-3.15.8-linux-x86_64.zip -d $HOME/.local
+export PATH=~/.local/bin:$PATH # Add this to your `~/.bashrc`.
+protoc --version
+libprotoc 3.15.8
+```
+4. 执行如下命令安装rust
+```shell
+# 下面两个环境变量，建议放在 ~/.bash_profile 或 ~/.bashrc 文件中
+# 然后执行 source ~/.bash_profile 或 source ~/.bashrc 生效
+export RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static
+export RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
+
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+这里也可以使用rsproxy代理(建议跟`~/.cargo/config.toml`文件中的`replace-with`配置保持一致)，这里我使用的是`ustc`镜像源
+```shell
+export RUSTUP_DIST_SERVER="https://rsproxy.cn"
+export RUSTUP_UPDATE_ROOT="https://rsproxy.cn/rustup"
+```
+
+通过 vim ~/.cargo/config.toml 文件添加如下内容：
+```toml
+[source.crates-io]
+#registry = "https://github.com/rust-lang/crates.io-index"
+# 指定镜像，这里可以根据实际情况选择不同的镜像
+replace-with = 'ustc'
+
+# 字节跳动的rsproxy，指定方式，只需要调整 [source.crates-io] 下面的 `replace-with = 'rsproxy-sparse'` 或 `replace-with = 'rsproxy'`
+[source.rsproxy]
+registry = "https://rsproxy.cn/crates.io-index"
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[registries.rsproxy]
+index = "https://rsproxy.cn/crates.io-index"
+
+# 清华大学
+[source.tuna]
+registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
+
+# 中国科学技术大学
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
+
+# 上海交通大学
+[source.sjtu]
+registry = "https://mirrors.sjtug.sjtu.edu.cn/git/crates.io-index"
+
+# rustcc社区
+[source.rustcc]
+registry = "git://crates.rustcc.cn/crates.io-index"
+
+# xuanwu社区，指定方式，只需要调整 [source.crates-io] 下面的 `replace-with = 'xuanwu-sparse'` 即可
+[source.xuanwu]
+registry = "https://mirror.xuanwu.openatom.cn/crates.io-index"
+[source.xuanwu-sparse]
+registry = "sparse+https://mirror.xuanwu.openatom.cn/index/"
+[registries.xuanwu]
+index = "https://mirror.xuanwu.openatom.cn/crates.io-index"
+
+[net]
+git-fetch-with-cli=true
+[http]
+check-revoke = false
+```
+
+5. 根据操作系统类型，在 https://nodejs.org/zh-cn/download 下载并安装nodejs
 
 # create a rust grpc project
 

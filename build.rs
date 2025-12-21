@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3.生成mod.rs文件
     // 用下面的rust方式生成mod.rs
     // 拓展名是proto的文件名写入mod.rs中，作为pub mod xxx;导出模块
-    // 先清空crates/pb/src/lib.rs文件内容
+    // 先清空mod.rs文件内容
     let mod_file = out_dir.join("mod.rs");
     let _ = fs::remove_file(mod_file);
 
