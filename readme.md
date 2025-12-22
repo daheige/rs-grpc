@@ -57,7 +57,7 @@ export RUSTUP_UPDATE_ROOT="https://rsproxy.cn/rustup"
 # 指定镜像，这里可以根据实际情况选择不同的镜像
 replace-with = 'ustc'
 
-# 字节跳动的rsproxy，指定方式，只需要调整 [source.crates-io] 下面的 `replace-with = 'rsproxy-sparse'` 或 `replace-with = 'rsproxy'`
+# 字节跳动的rsproxy，指定方式，只需要调整 [source.crates-io] 下面的 `replace-with = 'rsproxy-sparse'`
 [source.rsproxy]
 registry = "https://rsproxy.cn/crates.io-index"
 [source.rsproxy-sparse]
