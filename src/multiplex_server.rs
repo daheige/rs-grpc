@@ -1,13 +1,13 @@
 use autometrics::autometrics;
 use axum::{
-    Json, Router,
-    extract::Request as AxumRequest,
+    extract::Request as AxumRequest, http::header::CONTENT_TYPE,
     http::StatusCode,
-    http::header::CONTENT_TYPE,
     response::IntoResponse,
     routing::{get, post},
+    Json,
+    Router,
 };
-use infras::metrics::prometheus_init;
+use monitor::metrics::prometheus_init;
 use rust_grpc::hello::greeter_service_server::{GreeterService, GreeterServiceServer};
 use rust_grpc::hello::{HelloReply, HelloReq};
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,6 @@ use tonic::service::Routes;
 use tonic::{Request, Response, Status};
 use tower::{make::Shared, steer::Steer};
 
-mod infras;
 mod rust_grpc;
 
 // 这个file descriptor文件是build.rs中定义的descriptor_path路径
@@ -96,8 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // grpc reflection服务
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(PROTO_FILE_DESCRIPTOR_SET)
-        .build_v1()
-        .unwrap();
+        .build_v1()?;
 
     // grpc service
     let greeter = GreeterImpl::default();
@@ -140,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // run multiplex service on one port
         let listener = TcpListener::bind(&address).await.unwrap();
         axum::serve(listener, Shared::new(service))
-            .with_graceful_shutdown(infras::shutdown::graceful_shutdown(Duration::from_secs(3)))
+            .with_graceful_shutdown(shutdown::graceful_shutdown(Duration::from_secs(3)))
             .await
             .expect("failed to start multiplex service");
     });

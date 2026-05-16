@@ -2,26 +2,26 @@
 // grpc-go http gateway实现参考：https://github.com/grpc-ecosystem/grpc-gateway
 // 也可以使用rust axum http处理
 mod app;
-mod infras;
+
 mod rust_grpc;
 
-use rust_grpc::hello::HelloReq;
 use rust_grpc::hello::greeter_service_client::GreeterServiceClient;
+use rust_grpc::hello::HelloReq;
 
 // 用于http 请求处理
 use axum::routing::{get, post};
-use axum::{Json, Router, http::StatusCode, response::IntoResponse};
+use axum::{http::StatusCode, response::IntoResponse, Json, Router};
 use tonic::Request;
 
 // 用于序列化处理
 use serde::{Deserialize, Serialize};
 
 // 用于http 启动
-use crate::infras::logger::Logger;
 use app::APP_CONFIG;
 use autometrics::autometrics;
-use infras::metrics::{API_SLO, prometheus_init};
 use log::info;
+use logger::Logger;
+use monitor::metrics::{prometheus_init, API_SLO};
 use std::net::SocketAddr;
 use std::process;
 use std::sync::Arc;
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("current process pid:{}", process::id());
 
     // 初始化日志配置
-    Logger::builder().init();
+    Logger::new().init();
 
     // 读取配置文件
     info!("app_debug:{}", APP_CONFIG.app_debug);

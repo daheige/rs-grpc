@@ -1,4 +1,4 @@
-use crate::infras::config::{Config, ConfigTrait};
+use config::{Config, ConfigTrait};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -20,7 +20,9 @@ pub static APP_CONFIG: Lazy<AppConfig> = Lazy::new(|| {
     let filename = Path::new(config_dir.as_str()).join("app-gw.yaml");
     println!("filename:{:?}", filename);
 
-    let c = Config::load(filename);
+    let mut c = Config::new(filename);
+    c.load().expect("failed to load config");
+
     // read config to struct
     let conf: AppConfig = serde_yaml::from_str(c.content()).unwrap();
     // 开发过程中，可以取消下面的注释

@@ -1,15 +1,14 @@
-use crate::infras::logger::Logger;
 use app::APP_CONFIG;
 use autometrics::autometrics;
-use infras::metrics::{API_SLO, prometheus_init};
 use log::info;
+use logger::Logger;
+use monitor::metrics::{prometheus_init, API_SLO};
 use rust_grpc::hello::greeter_service_server::{GreeterService, GreeterServiceServer};
 use rust_grpc::hello::{HelloReply, HelloReq};
 use std::net::SocketAddr;
 use std::time::Duration;
-use tonic::{Request, Response, Status, transport::Server};
+use tonic::{transport::Server, Request, Response, Status};
 
-mod infras;
 /// 定义grpc代码生成的包名
 mod rust_grpc;
 
@@ -47,7 +46,7 @@ impl GreeterService for GreeterImpl {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化日志配置
-    Logger::builder().init();
+    Logger::new().init();
     println!("current pid:{}", std::process::id());
 
     // 读取配置文件
@@ -71,10 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Server::builder()
             .add_service(reflection_service)
             .add_service(GreeterServiceServer::new(greeter))
-            .serve_with_shutdown(
-                address,
-                infras::shutdown::graceful_shutdown(Duration::from_secs(3)),
-            )
+            .serve_with_shutdown(address, shutdown::graceful_shutdown(Duration::from_secs(3)))
             .await
             .expect("failed to start grpc server");
     });
