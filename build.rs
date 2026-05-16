@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .out_dir(out_dir)
         .compile_protos(&file_list, &[proto_dir])?;
 
-    // 4.读取src下面生成好的rust文件，并将模块名字写入lib.rs文件中
+    // 4.读取src下面生成好的rust文件，并将模块名字写入mod.rs文件中
     // 也就是说，将文件名字作为模块名字，格式：pub mod xxx;
     // 这里需要先清空src/rust_grpc/mod.rs文件内容
     let mod_filename = out_dir.join("mod.rs");
