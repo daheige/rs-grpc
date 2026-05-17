@@ -1237,7 +1237,6 @@ dependencies = [
  "autometrics",
  "axum",
  "config",
- "env_logger",
  "log",
  "logger",
  "monitor",

@@ -43,7 +43,7 @@ tower = { version = "0.5.3", features = ["steer"] }
 
 # 操作日志
 log = "0.4.29"
-env_logger = { version = "0.11.10", features = ["color"] }
+#env_logger = { version = "0.11.10", features = ["color"] }
 
 # tracing追踪
 #tracing = "0.1"
