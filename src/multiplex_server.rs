@@ -1,4 +1,5 @@
 use autometrics::autometrics;
+use axum::extract::State;
 use axum::{
     extract::Request as AxumRequest, http::header::CONTENT_TYPE,
     http::StatusCode,
@@ -12,6 +13,7 @@ use rust_grpc::hello::greeter_service_server::{GreeterService, GreeterServiceSer
 use rust_grpc::hello::{HelloReply, HelloReq};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tonic::service::Routes;
@@ -25,8 +27,18 @@ mod rust_grpc;
 pub(crate) const PROTO_FILE_DESCRIPTOR_SET: &[u8] = include_bytes!("rust_grpc/rpc_descriptor.bin");
 
 /// 实现hello.proto 接口服务
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GreeterImpl {}
+
+#[derive(Clone)]
+pub struct AppState {
+    greeter: GreeterImpl,
+}
+
+fn new_greeter() -> GreeterImpl {
+    let greeter = GreeterImpl::default();
+    greeter
+}
 
 #[async_trait::async_trait]
 impl GreeterService for GreeterImpl {
@@ -59,10 +71,12 @@ pub struct Reply<T> {
 
 // 将请求反序列化到HelloReq，然后调用grpc service
 #[autometrics]
-async fn say_hello(Json(payload): Json<HelloReq>) -> impl IntoResponse {
+async fn say_hello(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<HelloReq>,
+) -> impl IntoResponse {
     let req = Request::new(payload);
-    let greeter = GreeterImpl::default();
-    let response = greeter.say_hello(req).await;
+    let response = state.greeter.say_hello(req).await;
     match response {
         Ok(res) => {
             let reply = res.into_inner();
@@ -98,7 +112,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_v1()?;
 
     // grpc service
-    let greeter = GreeterImpl::default();
+    let greeter = new_greeter();
+    let greeter_clone = greeter.clone();
+    let app_state = Arc::new(AppState {
+        greeter: greeter_clone,
+    });
     let grpc_service = GreeterServiceServer::new(greeter);
 
     // create grpc server
@@ -109,7 +127,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // build the rest service
     let rest_server = Router::new()
         .route("/", get(web_root))
-        .route("/v1/greeter/say_hello", post(say_hello));
+        .route("/v1/greeter/say_hello", post(say_hello))
+        .with_state(app_state);
 
     // combine them into one service
     let service = Steer::new(

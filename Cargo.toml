@@ -1,6 +1,6 @@
 [package]
 name = "rs-grpc"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 
 [[bin]]
@@ -22,7 +22,7 @@ tonic-prost = "0.14.6"
 tonic-reflection = "0.14.6"
 
 # 异步运行时相关依赖
-tokio = { version = "1.52.1", features = ["full"] }
+tokio = { version = "1.52.3", features = ["full"] }
 async-trait = "0.1.89"
 
 # axum用于http服务
@@ -42,7 +42,7 @@ autometrics = { version = "3.0.0", features = ["prometheus-exporter"] }
 tower = { version = "0.5.3", features = ["steer"] }
 
 # 操作日志
-log = "0.4.29"
+log = "0.4.30"
 #env_logger = { version = "0.11.10", features = ["color"] }
 
 # tracing追踪
@@ -53,10 +53,10 @@ log = "0.4.29"
 #chrono = "0.4.44"
 
 # 引入基础组件库hera
-config = { git = "https://github.com/rs-god/hera", tag = "v1.1.6" }
-logger = { git = "https://github.com/rs-god/hera", tag = "v1.1.6" }
-monitor = { git = "https://github.com/rs-god/hera", tag = "v1.1.6" }
-shutdown = { git = "https://github.com/rs-god/hera", tag = "v1.1.6" }
+config = { git = "https://github.com/rs-god/hera", tag = "v1.2.1" }
+logger = { git = "https://github.com/rs-god/hera", tag = "v1.2.1" }
+monitor = { git = "https://github.com/rs-god/hera", tag = "v1.2.1" }
+shutdown = { git = "https://github.com/rs-god/hera", tag = "v1.2.1" }
 
 [build-dependencies]
 # note: Must be the same as the tonic version
