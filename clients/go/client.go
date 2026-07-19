@@ -5,15 +5,16 @@ import (
 	"log"
 	"os"
 
-	"github.com/daheige/rs-grpc/utils"
-	"github.com/daheige/rs-grpc/clients/go/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/daheige/rs-grpc/clients/go/pb"
+	"github.com/daheige/rs-grpc/utils"
 )
 
 var (
-// 	address = "localhost:8081" // grpc server and http gateway on share port
+	// 	address = "localhost:8081" // grpc server and http gateway on share port
 	address = "localhost:50051" // grpc server port without http gateway
 	// address     = "localhost:50050" // nginx grpc_pass port
 	defaultName = "golang grpc"
@@ -33,14 +34,14 @@ func main() {
 	// instead. Will be supported throughout 1.x.
 	// conn, err := grpc.Dial(address, grpc.WithInsecure())
 	// so use grpc.WithTransportCredentials(insecure.NewCredentials()) as default grpc.DialOption
-	conn, err := grpc.Dial(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
 
 	defer conn.Close()
 
-	c := pb.NewGreeterServiceClient(conn)
+	c := pb.NewGreeterClient(conn)
 
 	// Contact the server and print out its response.
 	name := defaultName
@@ -63,5 +64,5 @@ func main() {
 		log.Fatalf("could not greet: %v", err)
 	}
 
-	log.Printf("name:%s,message:%s", res.Name, res.Message)
+	log.Printf("message:%s", res.Message)
 }

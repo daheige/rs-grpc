@@ -1,6 +1,6 @@
 [package]
 name = "rs-grpc"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 
 [[bin]]
@@ -17,18 +17,18 @@ path = "src/multiplex_server.rs"
 
 [dependencies]
 tonic = "0.14.6"
-prost = "0.14.3"
+prost = "0.14.4"
 tonic-prost = "0.14.6"
 tonic-reflection = "0.14.6"
 
 # 异步运行时相关依赖
-tokio = { version = "1.52.3", features = ["full"] }
-async-trait = "0.1.89"
+tokio = { version = "1.53.0", features = ["full"] }
+async-trait = "0.1.91"
 
 # axum用于http服务
 axum = "0.8.9"
 
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
 #serde_json = "1.0.149"
 
 # 配置文件读取以及用于消息序列化和反序列化处理
@@ -42,7 +42,7 @@ autometrics = { version = "3.0.0", features = ["prometheus-exporter"] }
 tower = { version = "0.5.3", features = ["steer"] }
 
 # 操作日志
-log = "0.4.30"
+log = "0.4.33"
 #env_logger = { version = "0.11.10", features = ["color"] }
 
 # tracing追踪
@@ -50,13 +50,13 @@ log = "0.4.30"
 #tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # chrono用于时间处理
-#chrono = "0.4.44"
+chrono = "0.4.45"
 
 # 引入基础组件库hera
-config = { git = "https://github.com/rs-god/hera", tag = "v1.2.1" }
-logger = { git = "https://github.com/rs-god/hera", tag = "v1.2.1" }
-monitor = { git = "https://github.com/rs-god/hera", tag = "v1.2.1" }
-shutdown = { git = "https://github.com/rs-god/hera", tag = "v1.2.1" }
+config = { git = "https://github.com/rs-god/hera", tag = "v1.2.2" }
+logger = { git = "https://github.com/rs-god/hera", tag = "v1.2.2" }
+monitor = { git = "https://github.com/rs-god/hera", tag = "v1.2.2" }
+shutdown = { git = "https://github.com/rs-god/hera", tag = "v1.2.2" }
 
 [build-dependencies]
 # note: Must be the same as the tonic version

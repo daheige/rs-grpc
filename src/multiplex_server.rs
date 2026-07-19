@@ -1,15 +1,12 @@
+use crate::rust_grpc::hello::{HealthzReply, HealthzReq};
 use autometrics::autometrics;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::{
-    extract::Request as AxumRequest, http::header::CONTENT_TYPE,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::{get, post},
-    Json,
-    Router,
+    Json, Router, extract::Request as AxumRequest, http::StatusCode, http::header::CONTENT_TYPE,
+    response::IntoResponse, routing::get,
 };
 use monitor::metrics::prometheus_init;
-use rust_grpc::hello::greeter_service_server::{GreeterService, GreeterServiceServer};
+use rust_grpc::hello::greeter_server::{Greeter, GreeterServer};
 use rust_grpc::hello::{HelloReply, HelloReq};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -41,17 +38,32 @@ fn new_greeter() -> GreeterImpl {
 }
 
 #[async_trait::async_trait]
-impl GreeterService for GreeterImpl {
+impl Greeter for GreeterImpl {
     // 实现async_hello方法
     #[autometrics]
     async fn say_hello(&self, request: Request<HelloReq>) -> Result<Response<HelloReply>, Status> {
         // 获取request pb message
         let req = &request.into_inner();
-        println!("got request.id:{}", req.id);
         println!("got request.name:{}", req.name);
         let reply = HelloReply {
             message: format!("hello,{}", req.name),
-            name: format!("{}", req.name).into(),
+        };
+
+        Ok(Response::new(reply))
+    }
+
+    #[autometrics]
+    async fn healthz(
+        &self,
+        request: Request<HealthzReq>,
+    ) -> Result<Response<HealthzReply>, Status> {
+        let req = request.into_inner();
+        println!("req:{:?}", req);
+
+        let current_time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let reply = HealthzReply {
+            current_time,
+            alive: true,
         };
 
         Ok(Response::new(reply))
@@ -72,10 +84,11 @@ pub struct Reply<T> {
 // 将请求反序列化到HelloReq，然后调用grpc service
 #[autometrics]
 async fn say_hello(
+    Path(name): Path<String>,
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<HelloReq>,
 ) -> impl IntoResponse {
-    let req = Request::new(payload);
+    println!("got name:{}", name);
+    let req = Request::new(HelloReq { name });
     let response = state.greeter.say_hello(req).await;
     match response {
         Ok(res) => {
@@ -117,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = Arc::new(AppState {
         greeter: greeter_clone,
     });
-    let grpc_service = GreeterServiceServer::new(greeter);
+    let grpc_service = GreeterServer::new(greeter);
 
     // create grpc server
     let grpc_server = Routes::new(grpc_service)
@@ -127,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // build the rest service
     let rest_server = Router::new()
         .route("/", get(web_root))
-        .route("/v1/greeter/say_hello", post(say_hello))
+        .route("/v1/greeter/say/{name}", get(say_hello))
         .with_state(app_state);
 
     // combine them into one service
@@ -151,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // create http /metrics endpoint
-    let metrics_server = prometheus_init(8091);
+    let metrics_server = prometheus_init(8092);
     let metrics_handler = tokio::spawn(metrics_server);
     let multiplex_handler = tokio::spawn(async move {
         // run multiplex service on one port

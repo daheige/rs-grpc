@@ -2,12 +2,12 @@ use app::APP_CONFIG;
 use autometrics::autometrics;
 use log::info;
 use logger::Logger;
-use monitor::metrics::{prometheus_init, API_SLO};
-use rust_grpc::hello::greeter_service_server::{GreeterService, GreeterServiceServer};
-use rust_grpc::hello::{HelloReply, HelloReq};
+use monitor::metrics::{API_SLO, prometheus_init};
+use rust_grpc::hello::greeter_server::{Greeter, GreeterServer};
+use rust_grpc::hello::{HealthzReply, HealthzReq, HelloReply, HelloReq};
 use std::net::SocketAddr;
 use std::time::Duration;
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{Request, Response, Status, transport::Server};
 
 /// 定义grpc代码生成的包名
 mod rust_grpc;
@@ -23,7 +23,23 @@ pub(crate) const PROTO_FILE_DESCRIPTOR_SET: &[u8] = include_bytes!("rust_grpc/rp
 pub struct GreeterImpl {}
 
 #[async_trait::async_trait]
-impl GreeterService for GreeterImpl {
+impl Greeter for GreeterImpl {
+    async fn healthz(
+        &self,
+        request: Request<HealthzReq>,
+    ) -> Result<Response<HealthzReply>, Status> {
+        let req = request.into_inner();
+        println!("req:{:?}", req);
+
+        let current_time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let reply = HealthzReply {
+            current_time,
+            alive: true,
+        };
+
+        Ok(Response::new(reply))
+    }
+
     // 实现async_hello方法
     #[autometrics(objective = API_SLO)]
     // 也可以使用下面的方式，简单处理
@@ -31,11 +47,9 @@ impl GreeterService for GreeterImpl {
     async fn say_hello(&self, request: Request<HelloReq>) -> Result<Response<HelloReply>, Status> {
         // 获取request pb message
         let req = &request.into_inner();
-        println!("got request.id:{}", req.id);
         println!("got request.name:{}", req.name);
         let reply = HelloReply {
             message: format!("hello,{}", req.name),
-            name: format!("{}", req.name).into(),
         };
 
         Ok(Response::new(reply))
@@ -69,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let grpc_handler = tokio::spawn(async move {
         Server::builder()
             .add_service(reflection_service)
-            .add_service(GreeterServiceServer::new(greeter))
+            .add_service(GreeterServer::new(greeter))
             .serve_with_shutdown(address, shutdown::graceful_shutdown(Duration::from_secs(3)))
             .await
             .expect("failed to start grpc server");

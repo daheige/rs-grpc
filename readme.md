@@ -1,759 +1,605 @@
 # rs-grpc
 
-rust grpc microservices in action project https://github.com/daheige/rs-grpc
+基于 Rust 的 gRPC 微服务实战项目，采用 [tonic](https://crates.io/crates/tonic) + [prost](https://crates.io/crates/prost) + [tokio](https://crates.io/crates/tokio) 构建，同时提供 Rust HTTP Gateway、多路复用（Multiplex）服务以及 Go/Node.js 客户端示例。
 
-# rust grpc crate
+GitHub: https://github.com/daheige/rs-grpc
 
-tonic https://crates.io/crates/tonic
+---
 
-# grpc client support
+## 目录
 
-- rust grpc采用tokio,tonic,tonic-build 和 prost 代码生成，进行构建
-- grpc客户端支持go,nodejs,rust等不同语言调用服务端程序
-- 支持http gateway模式（http json请求到网关层后，转换为pb message，然后发起grpc service调用
+- [核心特性](#核心特性)
+- [架构设计](#架构设计)
+- [目录结构](#目录结构)
+- [环境准备](#环境准备)
+- [PB 客户端代码生成](#pb-客户端代码生成)
+- [快速开始](#快速开始)
+- [客户端使用示例](#客户端使用示例)
+- [grpcurl 工具使用](#grpcurl-工具使用)
+- [Rust HTTP Gateway 网关设计](#rust-http-gateway-网关设计)
+- [Multiplex 服务](#multiplex-服务)
+- [日志 logger 使用](#日志-logger-使用)
+- [Docker 容器构建](#docker-容器构建)
+- [Makefile 命令](#makefile-命令)
+- [pb协议托管](#pb协议托管)
+- [相关链接](#相关链接)
 
-# tools installation before development
+---
 
-1. 进入 https://go.dev/dl/ 官方网站，根据系统安装不同的go版本，这里推荐在linux或mac系统上面安装go。
-2. 设置Go GOPROXY 环境变量
+## 核心特性
+
+- **Rust gRPC 服务**：基于 `tonic` + `tokio` 实现高性能异步 gRPC Server。
+- **多语言客户端支持**：提供 Rust、Go、Node.js 客户端调用示例及代码生成脚本。
+- **gRPC Reflection**：服务端注册反射服务，支持 `grpcurl` 动态发现 proto。
+- **Rust HTTP Gateway**：基于 `axum` 实现 HTTP JSON 请求转发到 gRPC 服务。
+- **Multiplex 单端口服务**：借助 `tower::steer` 将 gRPC 与 HTTP 服务运行在同一端口。
+- **Prometheus 指标**：通过 `autometrics` + `monitor` 暴露 `/metrics` 端点。
+- **配置化启动**：使用 YAML 配置文件，结合 `config` 库读取应用配置。
+- **优雅停机**：集成 `shutdown` 库实现信号捕获与优雅退出。
+- **Docker 化部署**：提供 `Dockerfile`、`Dockerfile-gateway` 及 `Makefile` 一键构建运行。
+
+---
+
+## 架构设计
+
+```text
+┌─────────────────┐      HTTP/JSON       ┌──────────────────┐      gRPC       ┌─────────────────┐
+│   HTTP Client   │ ───────────────────▶ │  rs-grpc-gateway │ ──────────────▶ │   rs-grpc       │
+└─────────────────┘                      └──────────────────┘                 └─────────────────┘
+                                              │                                      │
+                                              ▼                                      ▼
+                                       /metrics:8091                          /metrics:8090
+
+┌─────────────────┐                                              ┌─────────────────────────────┐
+│   gRPC Client   │ ───────────────────────────────────────────▶ │  rs-multiplex-svc (gRPC+HTTP│
+└─────────────────┘                                              │  on port 8081)              │
+                                                                 └─────────────────────────────┘
+```
+
+- **rs-grpc**：纯 gRPC 服务，监听 `grpc_port`（默认 `50051`），并暴露 `/metrics`（默认 `8090`）。
+- **rs-grpc-gateway**：独立 HTTP 网关，监听 `gateway_port`（默认 `8080`），将 HTTP 请求转换为 gRPC 调用。
+- **rs-multiplex-svc**：gRPC 与 HTTP 共用端口（默认 `8081`），通过 `Content-Type` 判断请求类型并路由。
+- **rs-rpc-client**：Rust gRPC 客户端示例。
+
+---
+
+## 目录结构
+
+```text
+rs-grpc/
+├── app.yaml                  # rs-grpc 服务配置文件
+├── app-gw.yaml               # gateway 服务配置文件
+├── bin/                      # 脚本目录
+│   ├── go-gen.sh             # 生成 Go gRPC/gateway 代码
+│   ├── nodejs-gen.sh         # 生成 Node.js gRPC 代码
+│   ├── docker-rpc-build.sh
+│   └── entrypoint.sh
+├── build.rs                  # Rust PB 代码生成构建脚本
+├── Cargo.toml
+├── clients/                  # 多语言客户端示例
+│   ├── go/
+│   │   ├── client.go
+│   │   └── pb/
+│   └── nodejs/
+│       ├── hello.js
+│       └── pb/
+├── gateway/                  # Rust HTTP Gateway
+│   ├── main.rs
+│   ├── app.rs
+│   └── rust_grpc/
+├── proto/                    # proto 定义
+│   ├── hello.proto
+│   └── google/api/annotations.proto
+├── src/                      # Rust gRPC 服务源码
+│   ├── main.rs               # 纯 gRPC Server
+│   ├── client.rs             # Rust 客户端
+│   ├── multiplex_server.rs   # gRPC + HTTP 多路复用服务
+│   ├── app.rs                # 配置读取
+│   └── rust_grpc/            # 生成的 Rust PB 代码
+├── utils/                    # Go 工具包
+├── Dockerfile
+├── Dockerfile-gateway
+├── Dockerfile-dev
+└── Makefile
+```
+
+---
+
+## 环境准备
+
+### 1. 安装 Go
+
+访问 https://go.dev/dl/ 下载并安装，推荐 Linux 或 macOS。安装后设置代理：
 
 ```shell
 go env -w GOPROXY=https://goproxy.cn,direct
 ```
 
-3. 安装protoc工具
+### 2. 安装 protoc
 
-- mac系统安装方式如下：
+**macOS：**
 
 ```shell
-brew install automake
-brew install libtool
-brew install protobuf
+brew install automake libtool protobuf
 ```
 
-- linux系统安装方式如下：
+**Linux：**
 
 ```shell
-# Reference: https://grpc.io/docs/protoc-installation/
 PB_REL="https://github.com/protocolbuffers/protobuf/releases"
 curl -LO $PB_REL/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
 unzip -o protoc-3.15.8-linux-x86_64.zip -d $HOME/.local
-export PATH=~/.local/bin:$PATH # Add this to your `~/.bashrc`.
+export PATH=$HOME/.local/bin:$PATH  # 建议加入 ~/.bashrc
 protoc --version
-libprotoc 3.15.8
 ```
 
-4. 执行如下命令安装rust
+### 3. 安装 Rust
 
 ```shell
-# 下面两个环境变量，建议放在 ~/.bash_profile 或 ~/.bashrc 文件中
-# 然后执行 source ~/.bash_profile 或 source ~/.bashrc 生效
 export RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static
 export RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
-
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-这里也可以使用rsproxy代理(建议跟`~/.cargo/config.toml`文件中的`replace-with`配置保持一致)，这里我使用的是`ustc`镜像源
+建议配置 `~/.cargo/config.toml` 使用国内镜像（ustc / rsproxy 等）。
+
+### 4. 安装 Node.js
+
+访问 https://nodejs.org/zh-cn/download 下载并安装。
+
+---
+
+## PB 客户端代码生成
+
+### Rust 代码生成
+
+Rust PB 代码通过 `build.rs` 在编译时自动生成：
+
+1. 读取 `proto/*.proto` 文件。
+2. 生成 Rust gRPC 代码到 `src/rust_grpc/`。
+3. 生成 `mod.rs` 并跳过 `google.api.rs`。
+4. 为生成的 Message 追加 `serde::Serialize` / `serde::Deserialize`，便于 HTTP JSON 序列化。
+5. 同步复制一份到 `gateway/rust_grpc/`（不含 `rpc_descriptor.bin`）。
+
+执行一次编译即可触发：
 
 ```shell
-export RUSTUP_DIST_SERVER="https://rsproxy.cn"
-export RUSTUP_UPDATE_ROOT="https://rsproxy.cn/rustup"
+cargo build
 ```
 
-通过 vim ~/.cargo/config.toml 文件添加如下内容：
-
-```toml
-[source.crates-io]
-#registry = "https://github.com/rust-lang/crates.io-index"
-# 指定镜像，这里可以根据实际情况选择不同的镜像
-replace-with = 'ustc'
-
-# 字节跳动的rsproxy，指定方式，只需要调整 [source.crates-io] 下面的 `replace-with = 'rsproxy-sparse'`
-[source.rsproxy]
-registry = "https://rsproxy.cn/crates.io-index"
-[source.rsproxy-sparse]
-registry = "sparse+https://rsproxy.cn/index/"
-
-[registries.rsproxy]
-index = "https://rsproxy.cn/crates.io-index"
-
-# 清华大学
-[source.tuna]
-registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
-
-# 中国科学技术大学
-[source.ustc]
-registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
-
-# 上海交通大学
-[source.sjtu]
-registry = "https://mirrors.sjtug.sjtu.edu.cn/git/crates.io-index"
-
-# rustcc社区
-[source.rustcc]
-registry = "git://crates.rustcc.cn/crates.io-index"
-
-# xuanwu社区，指定方式，只需要调整 [source.crates-io] 下面的 `replace-with = 'xuanwu-sparse'` 即可
-[source.xuanwu]
-registry = "https://mirror.xuanwu.openatom.cn/crates.io-index"
-[source.xuanwu-sparse]
-registry = "sparse+https://mirror.xuanwu.openatom.cn/index/"
-[registries.xuanwu]
-index = "https://mirror.xuanwu.openatom.cn/crates.io-index"
-
-[net]
-git-fetch-with-cli = true
-[http]
-check-revoke = false
-```
-
-5. 根据操作系统类型，在 https://nodejs.org/zh-cn/download 下载并安装nodejs
-
-# create a rust grpc project
+### Go 代码生成
 
 ```shell
-   cargo new rs-grpc
+sh bin/go-gen.sh
 ```
 
-1. 新建src/client.rs
+生成内容：
 
-```rust
-fn main() {}
-```
+- `clients/go/pb/hello.pb.go`
+- `clients/go/pb/hello_grpc.pb.go`
+- `clients/go/pb/hello.pb.gw.go`（grpc-gateway）
 
-2. 在src同级目录新建build.rs文件，添加如下内容：
+### Node.js 代码生成
 
-```rust
-use std::ffi::OsStr;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::{fs, io};
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 推荐下面的方式生成grpc rust代码
-    // 1.读取proto目录下的*.proto
-    let proto_dir: PathBuf = "proto".into(); // proto文件所在目录
-    let mut file_list = Vec::new(); // 需要读取的proto文件列表
-    let lists = proto_dir.read_dir().expect("failed to read proto dir");
-    for entry_path in lists {
-        if entry_path.as_ref().unwrap().path().is_file() {
-            file_list.push(entry_path.unwrap().path())
-        }
-    }
-
-    // 2.删除原来的src/rust_grpc目录，可以根据实际情况看是否需要删除
-    let out_dir = Path::new("src/rust_grpc"); // 存放grpc rust pb代码生成的目录
-    let _ = fs::remove_dir_all(out_dir);
-    let _ = fs::create_dir(out_dir);
-
-    // grpc reflection 描述信息这是一个二进制文件
-    let descriptor_path = out_dir.join("rpc_descriptor.bin");
-
-    // 3.生成rust grpc代码，需要指定 rust grpc pb代码生成的目录
-    tonic_prost_build::configure()
-        .file_descriptor_set_path(&descriptor_path)
-        .out_dir(out_dir)
-        .compile_protos(&file_list, &[proto_dir])?;
-
-    // 4.读取src下面生成好的rust文件，并将模块名字写入mod.rs文件中
-    // 也就是说，将文件名字作为模块名字，格式：pub mod xxx;
-    // 这里需要先清空src/rust_grpc/mod.rs文件内容
-    let mod_filename = out_dir.join("mod.rs");
-    let _ = fs::remove_file(&mod_filename); // 可根据实际情况，看是否需要删除
-    let mut mod_file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(&mod_filename)
-        .expect("failed to create mod.rs");
-
-    // header是生成的rust文件头提示说明
-    let header = String::from("// This file is @generated by prost-build. DO NOT EDIT.\n");
-    let _ = mod_file.write(header.as_bytes());
-
-    // 先读取src/rust_grpc中的文件，然后将模块名字写入mod.rs文件中
-    let ext: Option<&OsStr> = Some(&OsStr::new("rs")); // rust文件拓展名，不包含点
-    let lists = out_dir.read_dir().expect("failed to read src dir");
-    for entry_path in lists {
-        let p = entry_path.as_ref().unwrap().path();
-        if p.is_file() {
-            let path = entry_path?.path();
-            if path.extension().eq(&ext) {
-                let file = path.file_name().unwrap_or(OsStr::new(""));
-                let filename = file.to_str().unwrap();
-                if filename.contains("google.api") {
-                    // 跳过google.api.rs这样的文件
-                    fs::remove_file(out_dir.join(filename))?;
-                    continue;
-                }
-                if filename == "mod.rs" {
-                    // 跳过mod.rs文件
-                    continue;
-                }
-
-                // 获取文件名，不包含拓展名，并将模块名字写入mod.rs中
-                let module = filename.replace(".rs", "");
-                mod_file
-                    .write(format!("pub mod {};\n", module).as_bytes())
-                    .expect("failed to write to mod.rs");
-
-                // 为生成的message实现 serde encode/decode 功能
-                let filename = out_dir.join(filename);
-                let mut buffer = fs::read_to_string(&filename)?;
-                buffer = buffer.replace(
-                    "prost::Message",
-                    "prost::Message, serde::Serialize, serde::Deserialize",
-                );
-                fs::write(&filename, buffer).expect("failed to write file content");
-            }
-        }
-    }
-
-    // 将生成的代码放在rust gateway目录中
-    let gateway_dir = Path::new("gateway/rust_grpc");
-    fs::create_dir_all(gateway_dir)?; // 创建gateway目录
-    copy_dir_to(out_dir, gateway_dir)?;
-    fs::remove_file(gateway_dir.join("rpc_descriptor.bin"))?;
-
-    Ok(())
-}
-
-/// Copy the existing directory `src` to the target path `dst`.
-fn copy_dir_to(src: &Path, dst: &Path) -> io::Result<()> {
-    if !dst.is_dir() {
-        fs::create_dir(dst)?;
-    }
-    for entry_result in src.read_dir()? {
-        let entry = entry_result?;
-        let file_type = entry.file_type()?;
-        copy_to(&entry.path(), &file_type, &dst.join(entry.file_name()))?;
-    }
-    Ok(())
-}
-
-/// Copy whatever is at `src` to the target path `dst`.
-fn copy_to(src: &Path, src_type: &fs::FileType, dst: &Path) -> io::Result<()> {
-    if src_type.is_file() {
-        fs::copy(src, dst)?;
-    } else if src_type.is_dir() {
-        copy_dir_to(src, dst)?;
-    } else {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("don't know how to copy: {}", src.display()),
-        ));
-    }
-
-    Ok(())
-}
-```
-
-3. 添加依赖
-   具体见`Cargo.toml`
-
-4. cargo run --bin rs-grpc
-   这一步就会安装好所有的依赖，并构建proto/hello.proto
-
-5. 在src/main.rs中添加rust grpc server代码
-
-```rust
-use app::APP_CONFIG;
-use autometrics::autometrics;
-use log::info;
-use logger::Logger;
-use monitor::metrics::{prometheus_init, API_SLO};
-use rust_grpc::hello::greeter_service_server::{GreeterService, GreeterServiceServer};
-use rust_grpc::hello::{HelloReply, HelloReq};
-use std::net::SocketAddr;
-use std::time::Duration;
-use tonic::{transport::Server, Request, Response, Status};
-
-/// 定义grpc代码生成的包名
-mod rust_grpc;
-
-mod app;
-
-// 这个file descriptor文件是build.rs中定义的descriptor_path路径
-// 读取proto file descriptor bin二进制文件
-pub(crate) const PROTO_FILE_DESCRIPTOR_SET: &[u8] = include_bytes!("rust_grpc/rpc_descriptor.bin");
-
-/// 实现hello.proto 接口服务
-#[derive(Debug, Default)]
-pub struct GreeterImpl {}
-
-#[async_trait::async_trait]
-impl GreeterService for GreeterImpl {
-    // 实现async_hello方法
-    #[autometrics(objective = API_SLO)]
-    // 也可以使用下面的方式，简单处理
-    // #[autometrics]
-    async fn say_hello(&self, request: Request<HelloReq>) -> Result<Response<HelloReply>, Status> {
-        // 获取request pb message
-        let req = &request.into_inner();
-        println!("got request.id:{}", req.id);
-        println!("got request.name:{}", req.name);
-        let reply = HelloReply {
-            message: format!("hello,{}", req.name),
-            name: format!("{}", req.name).into(),
-        };
-
-        Ok(Response::new(reply))
-    }
-}
-
-/// 采用 tokio 运行时来跑grpc server
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 初始化日志配置
-    Logger::new().init();
-    println!("current pid:{}", std::process::id());
-
-    // 读取配置文件
-    info!("app_debug:{}", APP_CONFIG.app_debug);
-    let address: SocketAddr = format!("0.0.0.0:{}", APP_CONFIG.grpc_port).parse().unwrap();
-    info!("grpc server run on:{}", address);
-
-    // grpc reflection服务，这个可以根据实际情况来开启
-    let reflection_service = tonic_reflection::server::Builder::configure()
-        .register_encoded_file_descriptor_set(PROTO_FILE_DESCRIPTOR_SET)
-        .build_v1()
-        .unwrap();
-
-    // create http /metrics endpoint
-    let metrics_server = prometheus_init(APP_CONFIG.monitor_port);
-    let metrics_handler = tokio::spawn(metrics_server);
-
-    // create grpc server
-    let greeter = GreeterImpl::default();
-    let grpc_handler = tokio::spawn(async move {
-        Server::builder()
-            .add_service(reflection_service)
-            .add_service(GreeterServiceServer::new(greeter))
-            .serve_with_shutdown(address, shutdown::graceful_shutdown(Duration::from_secs(3)))
-            .await
-            .expect("failed to start grpc server");
-    });
-
-    // run async tasks by tokio try_join macro
-    let _ = tokio::try_join!(metrics_handler, grpc_handler);
-    Ok(())
-}
-```
-
-# settings
-
-配置文件读取，参考: `infras/config.rs` 和 `src/app.rs`
-
-# grpcurl tools usage
-
-grpcurl工具主要用于grpcurl请求，可以快速查看grpc proto定义以及调用grpc service定义的方法。
-https://github.com/fullstorydev/grpcurl
-
-tonic grpc reflection使用需要注意的事项：
-
-- 使用这个操作必须将grpc proto的描述信息通过add_service添加才可以
-- tonic 和 tonic-reflection 以及 tonic-build 需要相同的版本，这个需要在Cargo.toml设置一样
-
-1. 安装grpcurl工具
-
- ```shell
- brew install grpcurl
- ```
-
-如果你本地安装了golang，那可以直接运行如下命令，安装grpcurl工具
-
- ```shell
- go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
- ```
-
-2. 验证rs-grpc service启动的效果
-
- ```shell
- grpcurl -plaintext 127.0.0.1:50051 list
- ```
-
-执行上面的命令，输出结果如下：
-
- ```
- Hello.GreeterService
- grpc.reflection.v1alpha.ServerReflection
- ```
-
-3. 查看proto文件定义的所有方法
-
- ```shell
- grpcurl -plaintext 127.0.0.1:50051 describe Hello.GreeterService
- ```
-
-输出结果如下：
-
- ```
- Hello.GreeterService is a service:
- service GreeterService {
-   rpc SayHello ( .Hello.HelloReq ) returns ( .Hello.HelloReply );
- }
- ```
-
-4. 查看请求HelloReq请求参数定义
-
- ```shell
- grpcurl -plaintext 127.0.0.1:50051 describe Hello.HelloReq
- ```
-
-完整的HelloReq定义如下：
-
- ```
- Hello.HelloReq is a message:
- message HelloReq {
-   int64 id = 1;
-   string name = 2;
- }
- ```
-
-5. 查看相应HelloReply响应结果定义
-
- ```shell
- grpcurl -plaintext 127.0.0.1:50051 describe Hello.HelloReply
- ```
-
-完整的HelloReply定义如下：
-
- ```
- Hello.HelloReply is a message:
- message HelloReply {
-   string name = 1;
-   string message = 2;
- }
- ```
-
-6. 通过grpcurl调用rpc service method
-
- ```shell
- grpcurl -d '{"name":"daheige"}' -plaintext 127.0.0.1:50051 Hello.GreeterService.SayHello
- ```
-
-响应结果如下：
-
- ```json
- {
-  "name": "daheige",
-  "message": "hello,daheige"
-}
- ```
-
-# multiplex service
-
-由于tower steer抽象设计，可以将grpc service转换为axum http Router。因此，我们可以将grpc server 和 http gateway在一个端口上运行
-src/multiplex_server.rs。
-
-```toml
-# 添加如下依赖
-# 用于将grpc服务和http服务运行在一个端口上面
-tower = { version = "0.5.3", features = ["steer"] }
-```
-
-运行服务端：
-
-```shell
-cargo run --bin rs-multiplex-svc
-```
-
-成功运行后的效果：
-
-```
-Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.30s
-Running `target/debug/rs-multiplex-svc`
-grpc server and http server run on:0.0.0.0:8081
-```
-
-验证其运行效果:
-
-```shell
-grpcurl -d '{"name":"daheige"}' -plaintext 127.0.0.1:8081 Hello.GreeterService.SayHello
-```
-
-输出结果如下：
-
-```json
-{
-  "name": "daheige",
-  "message": "hello,daheige"
-}
-```
-
-发送 multiplex http 请求:
-
-```shell
-curl --location --request POST 'localhost:8081/v1/greeter/say_hello' \
---header 'Content-Type: application/json' \
---data-raw '{"id":1,"name":"daheige"}'
-```
-
-响应结果：
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "name": "daheige",
-    "message": "hello,daheige"
-  }
-}
-```
-
-- 这种将grpc service和http service同时启动的流程，借助的是tower steer特性。
-- 接入的路由，可以通过axum灵活配置处理，也就是说可以不用再额外再去实现grpc http gateway。
-
-# run grpc server
-
-```shell
-cargo run --bin rs-grpc
-```
-
-output:
-
-```
- Finished dev [unoptimized + debuginfo] target(s) in 0.18s
- Running `target/debug/rs-grpc`
- grpc server run on:127.0.0.1:50051
-```
-
-# run rust client
-
-```shell
-cargo run --bin rs-rpc-client
-```
-
-output:
-
-```
-    Finished dev [unoptimized + debuginfo] target(s) in 0.18s
-     Running `target/debug/rs-rpc-client`
-client:GreeterServiceClient { inner: Grpc { inner: Channel, origin: /, compression_encoding: None, accept_compression_encodings: EnabledCompressionEncodings } }
-res:Response { metadata: MetadataMap { headers: {"content-type": "application/grpc", "date": "Fri, 17 Nov 2023 16:11:10 GMT", "grpc-status": "0"} }, message: HelloReply { name: "daheige", message: "hello,daheige" }, extensions: Extensions }
-name:daheige
-message:hello,daheige
-```
-
-# run nodejs client
-
-install nodejs grpc tools
+先安装 `grpc-tools`：
 
 ```shell
 sh bin/node-grpc-tools.sh
 ```
 
-generate nodejs code
+再生成代码：
 
 ```shell
 sh bin/nodejs-gen.sh
 ```
 
-install nodejs package
+生成内容：
+
+- `clients/nodejs/pb/hello_pb.js`
+- `clients/nodejs/pb/hello_grpc_pb.js`
+
+### 一键生成
 
 ```shell
-sudo npm install -g yarn
-cd clients/nodejs && yarn install
+make gen
 ```
 
-run node client
+---
+
+## 快速开始
+
+### 1. 启动 gRPC 服务
 
 ```shell
-node clients/nodejs/hello.js
+cargo run --bin rs-grpc
 ```
 
-output:
+输出示例：
 
-```
-{
-  wrappers_: null,
-  messageId_: undefined,
-  arrayIndexOffset_: -1,
-  array: [ 'heige', 'hello,heige' ],
-  pivot_: 1.7976931348623157e+308,
-  convertedPrimitiveFields_: {}
-}
-message:  hello,heige
-name:  heige
+```text
+current pid:12345
+grpc server run on:0.0.0.0:50051
+prometheus at:0.0.0.0:8090/metrics
 ```
 
-# run go client
+### 2. 测试 Rust 客户端
 
 ```shell
-# please install go before run it.
-go mod tidy
-sh bin/go-gen.sh #generate go grpc/http gateway code
-cd clients/go && go build -o hello && ./hello
+cargo run --bin rs-rpc-client
 ```
 
-output:
+### 3. 启动 HTTP Gateway
 
-```
-2023/11/17 23:23:30 x-request-id:  56fde08ea70a4976bfcfd781ac8e8bba
-2023/11/17 23:23:30 name:golang grpc,message:hello,rust grpc
-```
-
-# rust http gateway
-
-1. 运行这个`gateway/main.rs`之前，请先启动src/main.rs启动rust grpc service
-2. 修改`app-gw.yaml`中的配置内容
+先确保 `app-gw.yaml` 中的 `grpc_addr` 指向已启动的 gRPC 服务地址：
 
 ```yaml
-app_name: "rs-grpc-gateway"
-app_debug: true # 是否开启调试模式
-# 该grpc_addr可以是服务的ip地址和端口模式，也可以是k8s命名服务的地址，例如：http://rs-grpc.local.svc:50051
-# 运行前请先启动rs-grpc，再运行该gateway
-grpc_addr: http://192.168.1.212:50051
-monitor_port: 8091
-gateway_port: 8080
+grpc_addr: http://127.0.0.1:50051
 ```
 
-运行方式如下：
+然后运行：
 
 ```shell
 cargo run --bin rs-grpc-gateway
 ```
 
-运行效果如下：
-
-```
-Finished dev [unoptimized + debuginfo] target(s) in 0.15s
-Running `target/debug/rs-grpc-gateway`
-rs-rpc http gateway
-current process pid:34744
-app run on:127.0.0.1:8080
-```
-
-验证http请求是否生效：
+访问 HTTP 接口：
 
 ```shell
-curl --location --request POST 'localhost:8080/v1/greeter/say_hello' \
---header 'Content-Type: application/json' \
---data-raw '{"id":1,"name":"daheige"}'
+curl http://localhost:8080/v1/greeter/say/daheige
 ```
 
-输出结果如下：
+响应：
 
 ```json
 {
   "code": 0,
   "message": "ok",
   "data": {
-    "name": "daheige",
     "message": "hello,daheige"
   }
 }
 ```
 
-http gateway运行机制(图片来自grpc-ecosystem/grpc-gateway):
-![](http-gateway.jpg)
+### 4. 启动 Multiplex 服务
 
-# prometheus metrics
+```shell
+cargo run --bin rs-multiplex-svc
+```
 
-src/main.rs代码片段如下：
+服务同时提供 gRPC 与 HTTP：
+
+```shell
+# gRPC
+grpcurl -d '{"name":"daheige"}' -plaintext 127.0.0.1:8081 Hello.Greeter.SayHello
+
+# HTTP
+curl http://localhost:8081/v1/greeter/say/daheige
+```
+
+---
+
+## 客户端使用示例
+
+### Rust 客户端
+
+```shell
+cargo run --bin rs-rpc-client
+```
+
+核心代码位于 `src/client.rs`：
 
 ```rust
-// create http /metrics endpoint
-let metrics_server = prometheus_init(8091);
-let metrics_handler = tokio::spawn(metrics_server);
-
-// create grpc server
-let greeter = GreeterImpl::default ();
-let grpc_handler = tokio::spawn( async move {
-Server::builder()
-.add_service(reflection_service)
-.add_service(GreeterServiceServer::new(greeter))
-.serve_with_shutdown(
-address,
-infras::shutdown::graceful_shutdown(Duration::from_secs(3)),
-)
-.await
-.expect("failed to start grpc server");
-});
-
-// run async tasks by tokio try_join macro
-let _ = tokio::try_join!(metrics_handler, grpc_handler);
-Ok(())
+let mut client = GreeterClient::connect("http://127.0.0.1:50051").await?;
+let response = client
+    .say_hello(Request::new(HelloReq { name: "daheige".into() }))
+    .await?;
+println!("message:{}", response.into_inner().message);
 ```
 
-运行rs-grpc服务端：
+### Go 客户端
 
 ```shell
-cargo run --bin rs-grpc
+cd clients/go && go run client.go daheige
 ```
 
-运行效果如下所示：
+预期输出：
 
-```
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
-     Running `target/debug/rs-grpc`
-grpc server run on:0.0.0.0:50051
-prometheus at:0.0.0.0:8090/metrics
-
+```text
+x-request-id:  <uuid>
+message:hello,daheige
 ```
 
-请求grpc服务接口：
+### Node.js 客户端
 
 ```shell
- grpcurl -d '{"name":"daheige"}' -plaintext 127.0.0.1:50051 Hello.GreeterService.SayHello
+cd clients/nodejs && yarn install
+node hello.js
 ```
 
-此时访问 metrics访问地址：http://localhost:8090/metrics 效果如下图所示：
-![](metrics.png)
-你可以根据实际情况接入grafana控制控制面板，实时观察prometheus指标。
+预期输出：
 
-# logger
+```text
+message: hello,heige
+```
 
-1. 日志记录使用`env_logger`和`log`库实现
-2. 如果想在启动时改变日志级别，可以通过指定环境变量启动应用
-3. 日志level 优先级 error > warn > info > debug > trace
-4. 启动方式：RUST_LOG=info cargo run --bin rs-grpc
+---
 
-## 本地运行方式
+## grpcurl 工具使用
 
-rpc服务运行方式如下：
+[grpcurl](https://github.com/fullstorydev/grpcurl) 是一款命令行 gRPC 调试工具，依赖服务端开启 gRPC Reflection。
+
+### 安装
+
+```shell
+brew install grpcurl
+# 或
+go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+```
+
+### 查看服务列表
+
+```shell
+grpcurl -plaintext 127.0.0.1:50051 list
+```
+
+输出：
+
+```text
+Hello.Greeter
+grpc.reflection.v1alpha.ServerReflection
+```
+
+### 查看服务方法
+
+```shell
+grpcurl -plaintext 127.0.0.1:50051 describe Hello.Greeter
+```
+
+输出：
+
+```text
+Hello.Greeter is a service:
+service Greeter {
+  rpc Healthz ( .Hello.HealthzReq ) returns ( .Hello.HealthzReply );
+  rpc SayHello ( .Hello.HelloReq ) returns ( .Hello.HelloReply );
+}
+```
+
+### 调用 RPC
+
+```shell
+grpcurl -d '{"name":"daheige"}' -plaintext 127.0.0.1:50051 Hello.Greeter.SayHello
+```
+
+响应：
+
+```json
+{
+  "message": "hello,daheige"
+}
+```
+
+---
+
+## Rust HTTP Gateway 网关设计
+
+`gateway/main.rs` 是一个独立的 HTTP Gateway：
+
+- 使用 `axum` 提供 HTTP 服务。
+- 将 HTTP Path 参数 `/v1/greeter/say/{name}` 转换为 `HelloReq`。
+- 通过 `GreeterClient` 发起 gRPC 调用。
+- 将 gRPC 响应包装为统一 JSON 结构返回。
+- 通过 `autometrics` 自动埋点，暴露 `/metrics`。
+
+运行前请确保：
+
+1. `src/main.rs` 已启动。
+2. `app-gw.yaml` 中的 `grpc_addr` 配置正确。
+
+启动：
+
+```shell
+cargo run --bin rs-grpc-gateway
+```
+
+测试：
+
+```shell
+curl http://localhost:8080/v1/greeter/say/daheige
+```
+
+HTTP Gateway 运行机制参考下图：
+
+![http-gateway](http-gateway.jpg)
+
+---
+
+## Multiplex 服务
+
+`src/multiplex_server.rs` 借助 `tower::steer` 将 gRPC 服务与 HTTP 服务合并到单个端口（默认 `8081`）：
+
+- 检测到 `Content-Type: application/grpc` 走 gRPC 路由。
+- 其他请求走 axum HTTP 路由。
+- 同时暴露 `/metrics`（默认 `8092`）。
+
+启动：
+
+```shell
+cargo run --bin rs-multiplex-svc
+```
+
+gRPC 测试：
+
+```shell
+grpcurl -d '{"name":"daheige"}' -plaintext 127.0.0.1:8081 Hello.Greeter.SayHello
+```
+
+HTTP 测试：
+
+```shell
+curl http://localhost:8081/v1/greeter/say/daheige
+```
+
+---
+
+## 日志 logger 使用
+
+项目通过 `log` + `logger` 库记录日志。日志级别优先级：
+
+```text
+error > warn > info > debug > trace
+```
+
+本地开发启动时可通过 `RUST_LOG` 环境变量指定级别：
 
 ```shell
 RUST_LOG=info cargo run --bin rs-grpc
-```
-
-rpc服务运行方式如下：
-
-```shell
 RUST_LOG=info cargo run --bin rs-grpc-gateway
 ```
 
-## 测试环境和线上环境运行方式
-
-rpc服务运行方式如下：
+生产环境二进制运行：
 
 ```shell
 RUST_LOG=info /app/rs-grpc
-```
-
-rpc服务运行方式如下：
-
-```shell
 RUST_LOG=info /app/rs-grpc-gateway
 ```
 
-# makefile
+---
 
-为了方便开发和运行，提供了makefile文件，可以快速通过make命令构建docker镜像后，再启动容器。
-运行方式如下：
+## Docker 容器构建
+
+项目提供 3 个 Dockerfile，分别用于开发环境、rs-grpc 服务与 gateway 服务。
+
+### 1. 开发环境镜像（Dockerfile-dev）
+
+`Dockerfile-dev` 基于 `rust:1.97.1-bullseye`，预装 Rust、Go、Node.js、protoc 等工具，用于统一开发/编译环境。
+
+构建：
+
+```shell
+make rust-dev
+# 或
+# docker build . -f Dockerfile-dev -t rs-grpc-dev:v1.0
+```
+
+该镜像Tag为 `rs-grpc-dev:v1.0`，后续 `Dockerfile` 和 `Dockerfile-gateway` 均依赖它作为 builder。
+
+### 2. rs-grpc 服务镜像（Dockerfile）
+
+采用多阶段构建：
+
+- **builder 阶段**：基于 `rs-grpc-dev:v1.0`，执行 `cargo build --release` 编译出 `rs-grpc` 二进制。
+- **运行阶段**：基于 `debian:bullseye-slim`，复制编译产物与 `bin/entrypoint.sh`，暴露端口 `50051` 和 `8090`。
+
+构建：
+
+```shell
+make rpc-build
+# 或
+# docker build . -f Dockerfile -t rs-grpc-proj:v1.0
+```
+
+运行：
+
+```shell
+make rpc-run
+# 或
+# docker run --name=rpc-svc -p 50051:50051 -p 8090:8090 \
+#   -v ./app.yaml:/app/app.yaml -itd rs-grpc-proj:v1.0
+```
+
+容器启动后会通过 `bin/entrypoint.sh` 执行 `/app/main`，并读取挂载的 `/app/app.yaml` 配置。
+
+### 3. Gateway 服务镜像（Dockerfile-gateway）
+
+同样采用多阶段构建，编译产物为 `rs-grpc-gateway`，暴露端口 `8080` 和 `8091`。
+
+构建：
+
+```shell
+make gateway-build
+# 或
+# docker build . -f Dockerfile-gateway -t rs-grpc-gateway:v1.0
+```
+
+运行：
+
+```shell
+make gateway-run
+# 或
+# docker run --name=rs-gateway -p 8080:8080 -p 8091:8091 \
+#   -v ./app-gw.yaml:/app/app-gw.yaml -itd rs-grpc-gateway:v1.0
+```
+
+注意：`app-gw.yaml` 中的 `grpc_addr` 需要填写宿主机可访问的 gRPC 服务地址（如 `http://host.docker.internal:50051` 或局域网 IP）。
+
+### 4. 配置文件挂载
+
+- rs-grpc 服务挂载 `app.yaml` 到容器 `/app/app.yaml`。
+- gateway 服务挂载 `app-gw.yaml` 到容器 `/app/app-gw.yaml`。
+- 可通过 `CONFIG_DIR` 环境变量改变配置目录，默认值为 `./`。
+
+### 5. 常用 Docker 命令
+
+```shell
+# 查看日志
+docker logs -f rpc-svc
+docker logs -f rs-gateway
+
+# 进入容器调试
+docker exec -it rpc-svc bash
+docker exec -it rs-gateway bash
+
+# 停止并删除
+make rpc-stop
+make gateway-stop
+```
+
+---
+
+## Makefile 命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `make rust-dev` | 构建 Rust 开发环境镜像 `rs-grpc-dev:v1.0` |
+| `make rpc-build` | 构建 rs-grpc 服务镜像 `rs-grpc-proj:v1.0` |
+| `make rpc-run` | 启动 rs-grpc 容器 |
+| `make rpc-stop` | 停止并删除 rs-grpc 容器 |
+| `make rpc-restart` | 重启 rs-grpc 容器 |
+| `make rpc-rebuild-run` | 重新构建并运行 rs-grpc |
+| `make gateway-build` | 构建 gateway 镜像 `rs-grpc-gateway:v1.0` |
+| `make gateway-run` | 启动 gateway 容器 |
+| `make gateway-stop` | 停止并删除 gateway 容器 |
+| `make gateway-restart` | 重启 gateway 容器 |
+| `make gen` | 生成 Go、Node.js、Rust PB 代码 |
+| `make gen-go-pb` | 生成 Go PB 代码 |
+| `make gen-node-pb` | 生成 Node.js PB 代码 |
+
+快速构建并运行 gRPC 服务：
 
 ```shell
 make rpc-build
 make rpc-run
 ```
 
-如果想重新构建和运行，直接运行`make rs-rebuild-run`即可。
+一键重新构建运行：
 
-# go grpc framework demo
+```shell
+make rpc-rebuild-run
+```
 
-https://github.com/daheige/hephfx
+---
 
-# go grpc http gateway
+## pb协议托管
+一般来说，为了方便pb跨语言项目使用，推荐将pb生成的代码托管到git仓库中。这样在Cargo.toml就可以直接通过git和tag引入。
+```toml
+# 通过git方式引入 hello-pb 包
+hello-pb = { git = "https://github.com/daheige/hello-pb",tag = "v1.1.1" }
+```
 
-https://github.com/grpc-ecosystem/grpc-gateway
+## 相关链接
+
+- tonic: https://crates.io/crates/tonic
+- grpc-gateway (Go): https://github.com/grpc-ecosystem/grpc-gateway
+- grpcurl: https://github.com/fullstorydev/grpcurl
+- Go gRPC 框架示例: https://github.com/daheige/hephfx

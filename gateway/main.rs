@@ -5,12 +5,14 @@ mod app;
 
 mod rust_grpc;
 
-use rust_grpc::hello::greeter_service_client::GreeterServiceClient;
-use rust_grpc::hello::HelloReq;
+use axum::extract::State;
+use axum::response::Response;
+use rust_grpc::hello::greeter_client::GreeterClient;
+use rust_grpc::hello::{HelloReply, HelloReq};
 
 // 用于http 请求处理
-use axum::routing::{get, post};
-use axum::{http::StatusCode, response::IntoResponse, Json, Router};
+use axum::routing::get;
+use axum::{Json, Router, http::StatusCode, response::IntoResponse};
 use tonic::Request;
 
 // 用于序列化处理
@@ -19,9 +21,10 @@ use serde::{Deserialize, Serialize};
 // 用于http 启动
 use app::APP_CONFIG;
 use autometrics::autometrics;
+use axum::extract::Path;
 use log::info;
 use logger::Logger;
-use monitor::metrics::{prometheus_init, API_SLO};
+use monitor::metrics::{API_SLO, prometheus_init};
 use std::net::SocketAddr;
 use std::process;
 use std::sync::Arc;
@@ -40,10 +43,11 @@ pub struct Reply<T> {
 #[autometrics(objective = API_SLO)]
 // 也可以使用下面的方式，简单处理
 // #[autometrics]
-async fn say_hello(Json(payload): Json<HelloReq>, state: Arc<AppState>) -> impl IntoResponse {
-    let req = Request::new(payload);
+async fn say_hello(Path(name): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+    println!("got name:{}", name);
+    let req = Request::new(HelloReq { name });
     let response = state.grpc_client.clone().say_hello(req).await;
-    println!("res:{:?}", response);
+    // println!("res:{:?}", response);
     match response {
         Ok(res) => {
             let res = res.into_inner();
@@ -55,22 +59,24 @@ async fn say_hello(Json(payload): Json<HelloReq>, state: Arc<AppState>) -> impl 
                     data: Some(res),
                 }),
             )
+                .into_response()
         }
         Err(err) => (
             StatusCode::OK,
-            Json(Reply {
+            Json(Reply::<HelloReply> {
                 code: 500,
                 message: format!("request err:{}", err),
                 data: None,
             }),
-        ),
+        )
+            .into_response(),
     }
 }
 
 // 定义传递给axum handlers的app_state，这里是通过引用计数的方式共享变量
 // Sharing state with handlers
 struct AppState {
-    grpc_client: GreeterServiceClient<tonic::transport::Channel>,
+    grpc_client: GreeterClient<tonic::transport::Channel>,
 }
 
 // 运行这个main.rs之前，请先启动src/main.rs启动rust grpc service
@@ -87,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let grpc_addr = APP_CONFIG.grpc_addr.as_str();
 
     // create grpc client
-    let grpc_client = GreeterServiceClient::connect(grpc_addr).await?;
+    let grpc_client = GreeterClient::connect(grpc_addr).await?;
 
     // 通过arc引用计数的方式传递state
     let app_state = Arc::new(AppState { grpc_client });
@@ -95,20 +101,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // create http router
     let router = Router::new()
         .route("/", get(|| async { "Hello world!" }))
-        .route(
-            "/v1/greeter/say_hello",
-            post({
-                // 这里通过代码块和闭包的方式传递state
-                // State can also be passed directly to handlers using closure captures
-                let app_state = app_state.clone();
-                move |body| say_hello(body, app_state)
-            }),
-        );
+        .route("/v1/greeter/say/{name}", get(say_hello))
+        .with_state(app_state);
 
     // http gateway address
-    let address: SocketAddr = format!("0.0.0.0:{}", APP_CONFIG.gateway_port)
-        .parse()
-        .unwrap();
+    let address: SocketAddr = format!("0.0.0.0:{}", APP_CONFIG.gateway_port).parse()?;
     info!("app run on:{}", address.to_string());
 
     // create gateway http server

@@ -5,7 +5,7 @@ let grpc = require('@grpc/grpc-js');
 let request = new messages.HelloReq();
 request.setName('heige');
 
-let client = new services.GreeterServiceClient(
+let client = new services.GreeterClient(
     'localhost:50051',
     // 'localhost:8081', // multiplex_server connection address
     // 'localhost:8090', // nginx grpc pass port
@@ -20,5 +20,4 @@ client.sayHello(request, function (err, data) {
 
     console.log(data);
     console.log("message: ", data.getMessage());
-    console.log("name: ", data.getName());
 });
